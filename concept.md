@@ -6,6 +6,8 @@ The goal of this project is to implement an automated software delivery lifecycl
 
 HedgeDoc allows multiple users to create, edit, and share Markdown documents in real time. It is a suitable application for this project because it consists of several components, including a web application, a database, and persistent file storage. These components provide a realistic scenario for demonstrating infrastructure provisioning, configuration management, containerization, continuous integration, and continuous deployment.
 
+Since I don't have mach experience with similar applications and technologies, I decided to select HedgeDoc from the recommended application options provided for the project. I chose the first recommended option to avoid spending too much time evaluating different applications and instead focus on the practical implementation of the project.
+
 The main objective is to establish a reproducible and automated infrastructure in which HedgeDoc can be developed, tested, deployed, and operated with as little manual intervention as reasonably possible.
 
 The project will focus not only on running the application but also on implementing an automated software lifecycle, from changes in the source code to the deployment of a new application version.
@@ -14,99 +16,66 @@ The project will focus not only on running the application but also on implement
 
 ### 2.1 Hosting Environment
 
-The application will be hosted on **Oracle Cloud Infrastructure (OCI)**, using its Always Free resources to minimize infrastructure costs.
+The application will be hosted on Fly.io, a cloud platform that provides application hosting and deployment capabilities. Fly.io allows applications to be deployed as lightweight virtual machines, with support for containerized workloads.
 
-OCI provides free compute resources, storage, and networking capabilities that are sufficient for hosting a small application. In particular, the Ampere A1 ARM-based compute instances offer up to 2 OCPUs and 12 GB of memory within the Always Free allowance.
-
-The infrastructure will consist of one virtual machine hosting two logically separated environments:
+The infrastructure will use Fly.io to host two logically separated environments:
 
 - **Staging:** Used to deploy and test new application versions before they reach production.
 - **Production:** Hosts the stable version of HedgeDoc and represents the environment intended for regular use.
 
-Both environments will run as separate Docker Compose stacks on the same virtual machine. They will have separate application containers, PostgreSQL databases, persistent volumes, and Docker networks.
+Both environments will run as separate deployments on Fly.io. They will have separate application containers, PostgreSQL databases, persistent volumes, and Docker networks.
 
 A local development environment will additionally be available using Docker Compose. This allows developers to work on the application without requiring access to the cloud infrastructure.
 
-Using one virtual machine keeps the infrastructure within the intended free-tier budget while still allowing the implementation of a deployment workflow with separate staging and production environments.
+Using Fly.io provides a relatively simple way to manage application deployments and separate staging and production environments without having to manually provision and maintain a traditional virtual machine. It also allows the project to focus on automating the software delivery lifecycle, including building, testing, and deploying new application versions.
 
 ### 2.2 Infrastructure Provisioning
 
-The cloud infrastructure will be provisioned using **Terraform**.
+The cloud infrastructure will be managed using the Fly.io CLI (flyctl).
 
-Terraform will define and manage the required infrastructure resources, including:
+The Fly.io CLI will be used to create, configure, and manage the required cloud resources, including:
 
-- An OCI compute instance.
-- A Virtual Cloud Network (VCN) and subnet.
-- Security lists or network security groups to restrict incoming network traffic.
-- Required storage resources and networking configuration.
+Fly.io applications for the staging and production environments.
 
-The infrastructure definition will be stored in a separate Git repository. This ensures that infrastructure changes are version-controlled, reviewable, and reproducible.
+Application deployment and machine configuration.
 
-The configuration of the provisioned server will be automated using **Ansible**. Ansible will be responsible for preparing the virtual machine, installing Docker and Docker Compose, configuring the required directories, and deploying the application stack.
+Persistent storage volumes where required.
 
-This separation allows Terraform to manage infrastructure resources while Ansible handles the configuration of the operating system and services running on it.
+Network and service configuration.
+
+Application secrets and environment variables.
+
+The infrastructure and deployment configuration will be stored in a separate Git repository. Fly.io configuration files, such as fly.toml, will be version-controlled to ensure that deployment settings are reproducible and reviewable.
+
+Infrastructure management and application deployment will be integrated into GitHub Actions where appropriate.
 
 ### 2.3 Application Architecture
 
-HedgeDoc will run as a containerized application using Docker and Docker Compose.
+HedgeDoc will run as a containerized application using Docker. Docker Compose will be used for the local development environment, while Fly.io will manage the application deployments in the cloud.
 
 The virtual machine will host the following services:
 
 - **HedgeDoc Staging:** An instance of the application used for testing new versions.
 - **HedgeDoc Production:** The stable application instance.
 - **PostgreSQL:** Separate database containers for staging and production.
-- **Caddy:** A reverse proxy that forwards incoming requests to the appropriate HedgeDoc instance and automatically manages HTTPS certificates.
 
 Docker Compose will manage the containers, their dependencies, networks, and persistent volumes.
 
 The two environments will use separate databases, uploads directories, and Docker networks to prevent unintended interference between them.
 
-The PostgreSQL databases and uploaded files will use persistent storage so that application restarts or container replacements do not result in data loss.
+Database access will be restricted to the internal Fly.io private network wherever possible. Only the application services will be exposed through their respective public endpoints.
 
-Only the reverse proxy will be directly accessible from the internet. Database access will be restricted to the internal Docker networks.
-
-The application will be configured through environment variables. Sensitive configuration values, such as database credentials, will be stored securely and will not be committed to the Git repositories.
+The application will be configured through environment variables. Sensitive configuration values, such as database credentials and application secrets, will be stored securely using Fly.io secrets and will not be committed to the Git repositories.
 
 ### 2.4 Architecture Diagram
 
 The planned infrastructure can be represented as follows:
 
-```mermaid
-flowchart TB
-    U[Users / Browser]
-    GH[GitHub Repositories]
-    GA[GitHub Actions]
-    GHCR[GitHub Container Registry]
+![](images/HedgeDocDeploymentPipelineDiagram.png)
 
-    subgraph OCI[Oracle Cloud Infrastructure]
-        subgraph VM[Single Compute Instance - ARM]
-            C[Caddy Reverse Proxy]
+The architecture diagram was generated using [Mermaid](https://mermaid.ai), a text-based diagramming tool that allows diagrams to be created and maintained using code.
 
-            subgraph ST[Staging]
-                SH[HedgeDoc]
-                SP[(PostgreSQL)]
-                SH --> SP
-            end
-
-            subgraph PR[Production]
-                PH[HedgeDoc]
-                PP[(PostgreSQL)]
-                PH --> PP
-            end
-
-            C --> SH
-            C --> PH
-        end
-    end
-
-    U --> C
-    GH --> GA
-    GA --> GHCR
-    GHCR --> SH
-    GHCR --> PH
-```
-
-Terraform provisions the OCI infrastructure, while Ansible configures the virtual machine and its services. GitHub Actions handles the application build and deployment process.
+Fly.io CLI (flyctl) is used to manage the cloud infrastructure and application configuration, while Fly.io handles the underlying application hosting and networking. GitHub Actions automates the application build, testing, and deployment process.
 
 ## 3. Software Lifecycle and Automation
 
@@ -146,16 +115,11 @@ After a successful CI pipeline, the application will be deployed to the cloud in
 
 The deployment process will consist of the following steps:
 
-1. **Staging deployment:** GitHub Actions connects to the OCI virtual machine via SSH and updates the staging Docker Compose stack to use the newly built application image.
-
+1. **Staging deployment:** GitHub Actions authenticates with Fly.io and deploys the newly built application image to the staging application.
 2. **Health checks:** After deployment, automated checks verify that the HedgeDoc instance starts successfully and responds to HTTP requests.
-
 3. **Staging verification:** The staging environment can be accessed to test the application before releasing the new version.
-
 4. **Production approval:** A manual approval step in GitHub Actions is required before deploying the new version to production.
-
-5. **Production deployment:** The same Docker image that was successfully deployed to staging is deployed to production. The application is updated using Docker Compose.
-
+5. **Production deployment:** The same Docker image that was successfully deployed to staging is deployed to production.
 6. **Post-deployment verification:** Health checks are executed again to ensure that the production application is running correctly.
 
 Using the same immutable image for both environments ensures that the tested version is also the version released to production.
@@ -166,9 +130,11 @@ If a deployment causes problems, the previous application image can be redeploye
 
 Infrastructure changes will be managed independently from application releases.
 
-When infrastructure code changes, Terraform will generate an execution plan showing the required modifications. After reviewing the plan, the changes can be applied to OCI.
+The Fly.io CLI (flyctl) will be used to create, configure, and manage the required Fly.io resources. Infrastructure changes will be made through CLI commands and configuration files, such as fly.toml.
 
-Following provisioning, Ansible will configure the server and ensure that the required services are installed and running.
+The configuration files will be stored in the infrastructure Git repository to ensure that changes are version-controlled, reviewable, and reproducible.
+
+Application-specific deployment configuration will also be maintained using Fly.io configuration files.
 
 This approach makes it possible to recreate the infrastructure from version-controlled definitions instead of relying on manually configured servers.
 
@@ -180,9 +146,9 @@ The following aspects will be considered:
 
 - **Persistent storage:** Database data and uploaded files will survive container restarts and application updates.
 - **Backups:** Regular PostgreSQL backups will be created to allow data recovery.
-- **HTTPS:** Caddy will provide encrypted communication using automatically managed TLS certificates.
+- **HTTPS:** Fly.io will provide encrypted communication using automatically managed TLS certificates.
 - **Health checks:** Application availability will be checked after deployment.
-- **Logging:** Container logs will be available through Docker for troubleshooting.
+- **Logging:** Application and machine logs will be available through Fly.io for troubleshooting.
 - **Updates:** Application dependencies and container images will be updated through controlled changes in the repositories.
 
 The deployment process will use versioned container images so that previous versions can be redeployed if a new release causes problems.
@@ -191,17 +157,17 @@ The deployment process will use versioned container images so that previous vers
 
 The project will provide three environments with different purposes.
 
-| Environment | Purpose | Deployment |
-|---|---|---|
-| Development | Local development and testing | Manual using Docker Compose |
-| Staging | Testing new application versions | Automatic through GitHub Actions |
-| Production | Running the stable application | Manual approval through GitHub Actions |
+|Environment|Purpose|Deployment|
+|-|-|-|
+|Development|Local development and testing|Manual using Docker Compose|
+|Staging|Testing new application versions|Automatic through GitHub Actions|
+|Production|Running the stable application|Manual approval through GitHub Actions|
 
-The development environment will run locally, while staging and production will run as separate Docker Compose stacks on the same OCI virtual machine.
+The development environment will run locally, while staging and production will run as separate applications on Fly.io.
 
 Both cloud environments will use the same basic application architecture but different configuration values, credentials, and domain names.
 
-Although staging and production share the underlying virtual machine, their application containers, databases, and persistent storage will be separated.
+Although staging and production will use the same Fly.io platform, their application instances, databases, and persistent storage will be separated.
 
 This separation allows new versions to be tested without directly affecting the production application.
 
@@ -209,24 +175,20 @@ This separation allows new versions to be tested without directly affecting the 
 
 The following technologies have been selected for the implementation:
 
-| Technology | Purpose | Reason for selection |
-|---|---|---|
-| Oracle Cloud Infrastructure | Cloud infrastructure | Provides Always Free compute resources suitable for a small application. |
-| Terraform | Infrastructure as Code | Allows infrastructure to be defined, version-controlled, and reproduced. |
-| Ansible | Configuration management | Automates server configuration without requiring an additional agent. |
-| Docker | Containerization | Provides consistent application environments. |
-| Docker Compose | Container management | Offers a straightforward way to manage multiple application services and environments. |
-| GitHub Actions | CI/CD | Integrates directly with GitHub and automates the software lifecycle. |
-| GitHub Container Registry | Image registry | Stores versioned application images for deployment. |
-| PostgreSQL | Database | Provides reliable persistent storage for HedgeDoc. |
-| Caddy | Reverse proxy | Handles HTTPS certificates and forwards requests to the application. |
-| Git | Version control | Tracks application source code and infrastructure changes. |
+|Technology|Purpose|Reason for selection|
+|-|-|-|
+|Fly.io|Cloud infrastructure|Provides container-based application hosting and deployment capabilities.|
+|Fly.io CLI (flyctl)|Infrastructure and deployment management|Official command-line tool for managing Fly.io applications and resources.|
+|Docker|Containerization|Provides consistent application environments.|
+|Docker Compose|Container management|Offers a straightforward way to manage the local development environment.|
+|GitHub Actions|CI/CD|Integrates directly with GitHub and automates the software lifecycle.|
+|GitHub Container Registry|Image registry|Stores versioned application images for deployment.|
+|PostgreSQL|Database|Provides reliable persistent storage for HedgeDoc.|
+|Git|Version control|Tracks application source code and infrastructure changes.|
 
-Kubernetes will not be used because the planned infrastructure is relatively small and does not require a full container orchestration platform. Docker Compose provides the functionality needed for this project with significantly less operational complexity.
+Kubernetes will not be used because the planned infrastructure is relatively small and does not require a full container orchestration platform. Fly.io provides the functionality needed for deploying and managing the application with significantly less operational complexity.
 
-Similarly, PostgreSQL will run as a container rather than using a separately managed database service. This keeps the infrastructure reproducible and allows the database configuration to be managed together with the application stack.
-
-The use of an ARM-based OCI compute instance is also suitable because the official HedgeDoc Docker images support both AMD64 and ARM64 architectures.
+Similarly, PostgreSQL will run as a separate service using persistent storage rather than relying on temporary container storage. This allows the database configuration and lifecycle to be managed independently from the application.
 
 ## 6. Repository Structure
 
@@ -246,23 +208,14 @@ The planned structure is:
 hedgedoc-infrastructure/
 ├── concept.md
 ├── README.md
-├── terraform/
-│   ├── main.tf
-│   ├── variables.tf
-│   ├── outputs.tf
-│   └── providers.tf
-├── ansible/
-│   ├── inventory/
-│   ├── playbooks/
-│   └── roles/
-├── docker/
+├── fly/
 │   ├── staging/
-│   │   ├── docker-compose.yml
-│   │   └── .env.example
-│   ├── production/
-│   │   ├── docker-compose.yml
-│   │   └── .env.example
-│   └── Caddyfile
+│   │   └── fly.toml
+│   └── production/
+│       └── fly.toml
+├── docker/
+│   └── development/
+│       └── docker-compose.yml
 └── .github/
     └── workflows/
         ├── infrastructure.yml
@@ -275,14 +228,14 @@ The exact structure may be adjusted during implementation.
 
 At the end of the project, the following results are expected:
 
-- A working HedgeDoc instance deployed in Oracle Cloud.
+- A working HedgeDoc instance deployed on Fly.io.
 - Separate staging and production environments.
-- Infrastructure that can be provisioned automatically using Terraform.
-- Server configuration automated using Ansible.
-- A containerized application stack managed with Docker Compose.
+- Infrastructure and application deployments managed using the Fly.io CLI.
+- A containerized application deployed using Fly.io.
+- A local development environment managed with Docker Compose.
 - An automated CI pipeline for testing and building the application.
 - An automated deployment pipeline for staging and production.
-- HTTPS access through a reverse proxy.
+- HTTPS access through Fly.io's built-in networking services.
 - Persistent database and upload storage.
 - A basic backup and recovery mechanism.
 - Documentation explaining the architecture, provisioning, deployment, and operation of the system.
@@ -296,14 +249,18 @@ The overall result will demonstrate how DevOps practices can be applied to an ex
 - HedgeDoc Docker deployment: https://docs.hedgedoc.org/setup/docker/
 - HedgeDoc production deployment recommendations: https://docs.hedgedoc.org/guides/production-ready/
 - HedgeDoc configuration documentation: https://docs.hedgedoc.org/configuration/
-- Oracle Cloud Free Tier: https://www.oracle.com/cloud/free/
-- Oracle Cloud Always Free resources: https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm
-- Terraform OCI provider: https://github.com/oracle/terraform-provider-oci
-- Terraform documentation: https://developer.hashicorp.com/terraform/docs
-- Ansible documentation: https://docs.ansible.com/
+- Fly.io documentation: https://fly.io/docs/
+- Fly.io application deployment: https://fly.io/docs/launch/
+- Fly.io configuration reference: https://fly.io/docs/reference/configuration/
+- Fly.io persistent storage: https://fly.io/docs/volumes/
+- Fly.io private networking: https://fly.io/docs/networking/private-networking/
+- Fly.io secrets: https://fly.io/docs/apps/secrets/
+- Fly.io CLI: https://fly.io/docs/flyctl/
 - Docker Compose documentation: https://docs.docker.com/compose/
 - GitHub Actions documentation: https://docs.github.com/en/actions
+- GitHub Container Registry documentation: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry
 
----
+\---
 
 **Source and assistance indication:** This concept was prepared with assistance from ChatGPT (OpenAI). The author is responsible for reviewing the proposed architecture, verifying the technical details, and making the final project decisions. Additional AI assistance and external sources used during implementation will be indicated according to the course requirements.
+
